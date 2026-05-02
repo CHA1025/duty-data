@@ -6,6 +6,7 @@ function App() {
   const [members, setMembers] = useState([]);
   const [history, setHistory] = useState(null);
   const [currentSchedule, setCurrentSchedule] = useState([]);
+  const [selectedYear, setSelectedYear] = useState(2026); // 연도 선택 상태 추가
   const [selectedMonths, setSelectedMonths] = useState("7,8");
   const [isConfirmed, setIsConfirmed] = useState(false);
 
@@ -19,21 +20,28 @@ function App() {
     init();
   }, []);
 
-  // 과거 기록 불러오기 함수
+  // 저장된 기록 불러오기
   const handleLoadSession = (sessionId) => {
     const session = history.data.find(s => s.sessionId === sessionId);
     if (session) {
       setCurrentSchedule(session.records);
-      const monthsOnly = sessionId.split('-')[1] || sessionId;
-      setSelectedMonths(monthsOnly);
+      
+      // 세션 이름에서 연도와 월 추출 (예: "2026년 7,8월")
+      const yearMatch = sessionId.match(/(\d{4})년/);
+      const monthMatch = sessionId.match(/년\s+(.*)월/);
+      
+      if (yearMatch) setSelectedYear(parseInt(yearMatch[1]));
+      if (monthMatch) setSelectedMonths(monthMatch[1]);
+      
       setIsConfirmed(true);
-      alert(sessionId + " 기록을 불러왔습니다. 수정 후 다시 저장할 수 있습니다.");
+      alert(sessionId + " 기록을 불러왔습니다.");
     }
   };
 
   const handleGenerate = () => {
     const months = selectedMonths.split(',').map(m => parseInt(m.trim()));
-    const targetDates = getSundays(2026, months);
+    // 선택된 연도(selectedYear)를 사용하여 일요일 계산
+    const targetDates = getSundays(selectedYear, months);
     const result = generateSchedule(targetDates, members, history, {});
     setCurrentSchedule(result);
     setIsConfirmed(false);
@@ -53,23 +61,28 @@ function App() {
   };
 
   const confirm = async () => {
-    const currentYear = 2026;
-    const sessionName = `${currentYear}-${selectedMonths}`;
-    const prevYearSessionName = `${currentYear - 1}-${selectedMonths}`;
+    // 새로운 명칭 규칙: YYYY년 MM월
+    const sessionName = `${selectedYear}년 ${selectedMonths}월`;
+    const prevYearSessionName = `${selectedYear - 1}년 ${selectedMonths}월`;
 
+    // 1. 1년 전 기록 자동 삭제
     let updatedHistoryData = history.data.filter(s => s.sessionId !== prevYearSessionName);
+    
+    // 2. 현재 세션 중복 확인 및 덮어쓰기
     const existingIndex = updatedHistoryData.findIndex(s => s.sessionId === sessionName);
     
+    let finalHistoryData;
     if (existingIndex !== -1) {
-      if (!window.confirm(sessionName + " 데이터가 존재합니다. 덮어쓰시겠습니까?")) return;
-      updatedHistoryData[existingIndex] = { sessionId: sessionName, records: currentSchedule };
+      if (!window.confirm(sessionName + " 데이터가 이미 존재합니다. 덮어쓰시겠습니까?")) return;
+      finalHistoryData = [...updatedHistoryData];
+      finalHistoryData[existingIndex] = { sessionId: sessionName, records: currentSchedule };
     } else {
-      updatedHistoryData.push({ sessionId: sessionName, records: currentSchedule });
+      finalHistoryData = [...updatedHistoryData, { sessionId: sessionName, records: currentSchedule }];
     }
 
-    const ok = await updateJson('history.json', updatedHistoryData, history.sha);
+    const ok = await updateJson('history.json', finalHistoryData, history.sha);
     if (ok) {
-      alert("성공적으로 저장되었습니다.");
+      alert("저장되었습니다.");
       setIsConfirmed(true);
       const h = await fetchJson('history.json');
       setHistory(h);
@@ -84,7 +97,7 @@ function App() {
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `mail_merge_${selectedMonths}.txt`;
+    link.download = `mail_merge_${selectedYear}_${selectedMonths}.txt`;
     link.click();
   };
 
@@ -93,15 +106,28 @@ function App() {
       <h2 style={{ borderBottom: '2px solid #333', paddingBottom: '10px' }}>일요일 당번 관리자</h2>
       
       <div style={{ display: 'flex', gap: '20px', marginBottom: '20px', padding: '15px', background: '#f5f5f5', borderRadius: '8px' }}>
-        <div style={{ flex: 1 }}>
-          <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>새 당번 생성</label>
-          <input value={selectedMonths} onChange={e => setSelectedMonths(e.target.value)} style={{ width: '60px', padding: '5px' }} placeholder="7,8" />
-          <button onClick={handleGenerate} style={{ marginLeft: '10px', padding: '5px 15px' }}>자동 생성</button>
+        <div style={{ flex: 1.5 }}>
+          <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>당번 설정</label>
+          <input 
+            type="number"
+            value={selectedYear} 
+            onChange={e => setSelectedYear(parseInt(e.target.value))} 
+            style={{ width: '60px', padding: '5px', marginRight: '5px' }} 
+          />
+          <span>년 </span>
+          <input 
+            value={selectedMonths} 
+            onChange={e => setSelectedMonths(e.target.value)} 
+            style={{ width: '60px', padding: '5px', marginLeft: '5px' }} 
+            placeholder="7,8" 
+          />
+          <span>월</span>
+          <button onClick={handleGenerate} style={{ marginLeft: '10px', padding: '5px 15px', cursor: 'pointer' }}>자동 생성</button>
         </div>
         
         <div style={{ flex: 1, borderLeft: '1px solid #ccc', paddingLeft: '20px' }}>
           <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>저장된 기록 불러오기</label>
-          <select onChange={e => handleLoadSession(e.target.value)} style={{ padding: '5px', width: '150px' }}>
+          <select onChange={e => handleLoadSession(e.target.value)} style={{ padding: '5px', width: '100%' }}>
             <option value="">기록 선택</option>
             {history?.data.map(s => <option key={s.sessionId} value={s.sessionId}>{s.sessionId}</option>)}
           </select>
