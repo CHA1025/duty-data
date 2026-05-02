@@ -1,93 +1,143 @@
-// 특정 연도와 월의 일요일 날짜 목록 생성
+// 특정 연도/월의 일요일 계산
 export const getSundays = (year, months) => {
   const sundays = [];
   months.forEach(month => {
     let d = new Date(year, month - 1, 1);
     while (d.getDay() !== 0) d.setDate(d.getDate() + 1);
     while (d.getMonth() === month - 1) {
-      sundays.push(new Date(d).toISOString().split('T')[0]);
+      const dateStr = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+      sundays.push(dateStr);
       d.setDate(d.getDate() + 7);
     }
   });
   return sundays;
 };
 
-// 각 멤버별 마지막 당번 날짜 계산 (주기성 확보)
-const getLastAssignmentDates = (history, members) => {
-  const lastDates = {};
-  members.forEach(m => { lastDates[m.name] = "1970-01-01"; });
+// 마지막 당번일 및 페어링 이력 계산
+const getDutyMetadata = (history, members) => {
+  const lastServed = {};
+  const pairingHistory = {}; // { '이름1-이름2': '마지막 날짜' }
 
-  if (history && history.data) {
+  members.forEach(m => {
+    lastServed[m.name] = "1970-01-01";
+    members.forEach(m2 => {
+      if (m.name !== m2.name) {
+        const key = [m.name, m2.name].sort().join('-');
+        pairingHistory[key] = "1970-01-01";
+      }
+    });
+  });
+
+  if (history?.data) {
     history.data.forEach(session => {
       session.records.forEach(record => {
         record.allNames.forEach(name => {
-          if (record.date > (lastDates[name] || "1970-01-01")) lastDates[name] = record.date;
+          if (record.date > (lastServed[name] || "1970-01-01")) lastServed[name] = record.date;
         });
+        // 같은 조(dish/wipe) 페어링 기록 저장
+        const updatePair = (group) => {
+          if (group.length === 2) {
+            const key = [...group].sort().join('-');
+            if (record.date > (pairingHistory[key] || "1970-01-01")) pairingHistory[key] = record.date;
+          }
+        };
+        updatePair(record.dish);
+        updatePair(record.wipe);
       });
     });
   }
-  return lastDates;
+  return { lastServed, pairingHistory };
 };
 
-// 슬롯별 유효성 검사 (가족, B그룹, 특정 기피 대상 등)
-export const validateSlot = (name, subGroup, otherInSubGroup, dayAllNames, allMembers, lastWeekNames) => {
-  const member = allMembers.find(m => m.name === name);
-  if (!member) return false;
+// 슬롯 유효성 검사
+export const validateSlot = (name, partnerName, dayAllNames, allMembers, lastWeekNames) => {
+  const m = allMembers.find(mem => mem.name === name);
+  if (!m) return false;
 
-  // 1. 2주 연속 참여 금지
-  if (lastWeekNames.includes(name)) return false;
+  if (lastWeekNames.includes(name)) return false; // 2주 연속 금지
+  if (dayAllNames.includes(name)) return false; // 중복 당번 금지
 
-  // 2. 가족 중복 금지
-  const familiesOnDay = dayAllNames.map(n => allMembers.find(m => m.name === n)?.familyId).filter(id => id && id !== "NONE");
-  if (member.familyId !== "NONE" && familiesOnDay.includes(member.familyId)) return false;
+  // 가족 중복 금지
+  const dayFamilies = dayAllNames.map(n => allMembers.find(mem => mem.name === n)?.familyId).filter(id => id && id !== "NONE");
+  if (m.familyId !== "NONE" && dayFamilies.includes(m.familyId)) return false;
 
-  // 3. B그룹 중복 금지 (같은 조 내 1명 제한)
-  if (member.isBGroup && otherInSubGroup.some(n => allMembers.find(m => m.name === n)?.isBGroup)) return false;
+  // B그룹 중복 금지 (조 내 1명)
+  if (m.isBGroup && partnerName) {
+    const partner = allMembers.find(mem => mem.name === partnerName);
+    if (partner?.isBGroup) return false;
+  }
 
-  // 4. 특정 금지 조합 (장하은 님 등 - 같은 조 내에서만 체크)
-  if (member.exclusionList && member.exclusionList.some(ex => otherInSubGroup.includes(ex))) return false;
-  const otherMember = allMembers.find(m => m.name === otherInSubGroup[0]);
-  if (otherMember?.exclusionList && otherMember.exclusionList.includes(name)) return false;
+  // 장하은 기피 리스트 (같은 조 내에서만)
+  if (m.exclusionList && m.exclusionList.includes(partnerName)) return false;
+  const p = allMembers.find(mem => mem.name === partnerName);
+  if (p?.exclusionList && p.exclusionList.includes(name)) return false;
 
   return true;
 };
 
-// 순번 기반 자동 생성 로직
-export const generateSchedule = (targetDates, members, history, fixedAndExcluded) => {
-  const fullHistory = history;
-  let currentHistoryRecords = [];
+export const generateSchedule = (targetDates, members, history) => {
+  let tempHistory = JSON.parse(JSON.stringify(history));
   let schedule = [];
-  
-  let lastWeek = (fullHistory.data && fullHistory.data.length > 0) 
-    ? fullHistory.data[fullHistory.data.length - 1].records.slice(-1)[0].allNames 
-    : [];
+  let lastWeek = (tempHistory.data.length > 0) ? tempHistory.data[tempHistory.data.length - 1].records.slice(-1)[0].allNames : [];
 
   for (const date of targetDates) {
-    const lastDates = getLastAssignmentDates({ data: [...fullHistory.data, { records: currentHistoryRecords }] }, members);
-    const sortedMembers = [...members].sort((a, b) => new Date(lastDates[a.name]) - new Date(lastDates[b.name]));
+    const { lastServed, pairingHistory } = getDutyMetadata(tempHistory, members);
+    const dayNames = [];
 
-    let dayDish = [];
-    let dayWipe = [];
+    // 1. 설거지 조 (18명 중 2명)
+    const dishCandidates = members.filter(m => m.canDishwash).sort((a, b) => new Date(lastServed[a.name]) - new Date(lastServed[b.name]));
+    let dish = [];
     
-    const fillSlot = (currentGroup, isDish) => {
-      for (const m of sortedMembers) {
-        if (dayDish.includes(m.name) || dayWipe.includes(m.name)) continue;
-        if (isDish && !m.canDishwash) continue; // 설거지 제외 인원 체크
+    for (let i = 0; i < dishCandidates.length; i++) {
+      const a = dishCandidates[i];
+      if (!validateSlot(a.name, null, dayNames, members, lastWeek)) continue;
+      
+      // 파트너 찾기 (A와 페어링 이력이 가장 오래된 사람)
+      const partners = dishCandidates.filter(p => p.name !== a.name)
+        .sort((p1, p2) => {
+          const key1 = [a.name, p1.name].sort().join('-');
+          const key2 = [a.name, p2.name].sort().join('-');
+          return new Date(pairingHistory[key1]) - new Date(pairingHistory[key2]);
+        });
 
-        if (validateSlot(m.name, isDish ? "dish" : "wipe", currentGroup, [...dayDish, ...dayWipe], members, lastWeek)) {
-          currentGroup.push(m.name);
-          return true;
+      for (let b of partners) {
+        if (validateSlot(b.name, a.name, [...dayNames, a.name], members, lastWeek)) {
+          dish = [a.name, b.name];
+          break;
         }
       }
-      return false;
-    };
+      if (dish.length === 2) break;
+    }
 
-    while (dayDish.length < 2) if (!fillSlot(dayDish, true)) break;
-    while (dayWipe.length < 2) if (!fillSlot(dayWipe, false)) break;
+    dayNames.push(...dish);
 
-    const record = { date, dish: dayDish, wipe: dayWipe, allNames: [...dayDish, ...dayWipe] };
+    // 2. 식기닦기 조 (22명 중 2명, 설거지 제외)
+    const wipeCandidates = members.sort((a, b) => new Date(lastServed[a.name]) - new Date(lastServed[b.name]));
+    let wipe = [];
+
+    for (let i = 0; i < wipeCandidates.length; i++) {
+      const a = wipeCandidates[i];
+      if (dayNames.includes(a.name) || !validateSlot(a.name, null, dayNames, members, lastWeek)) continue;
+
+      const partners = wipeCandidates.filter(p => p.name !== a.name && !dayNames.includes(p.name))
+        .sort((p1, p2) => {
+          const key1 = [a.name, p1.name].sort().join('-');
+          const key2 = [a.name, p2.name].sort().join('-');
+          return new Date(pairingHistory[key1]) - new Date(pairingHistory[key2]);
+        });
+
+      for (let b of partners) {
+        if (validateSlot(b.name, a.name, [...dayNames, a.name], members, lastWeek)) {
+          wipe = [a.name, b.name];
+          break;
+        }
+      }
+      if (wipe.length === 2) break;
+    }
+
+    const record = { date, dish, wipe, allNames: [...dish, ...wipe] };
     schedule.push(record);
-    currentHistoryRecords.push(record);
+    tempHistory.data.push({ records: [record] });
     lastWeek = record.allNames;
   }
   return schedule;
