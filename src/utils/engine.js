@@ -1,4 +1,4 @@
-// 연도와 월을 기반으로 해당 월의 모든 일요일 날짜를 계산합니다.
+// 특정 연도/월의 모든 일요일 날짜 계산
 export const getSundays = (year, months) => {
   const sundays = [];
   months.forEach(month => {
@@ -13,7 +13,7 @@ export const getSundays = (year, months) => {
   return sundays;
 };
 
-// 마지막 당번일 및 페어링 이력 계산
+// 각 멤버별 마지막 당번 데이터(전체/설거지/식기닦기) 및 조합 기록 추출
 const getDutyMetadata = (history, members, currentSessionName) => {
   const lastAny = {};
   const lastDish = {};
@@ -27,7 +27,7 @@ const getDutyMetadata = (history, members, currentSessionName) => {
     });
   });
 
-  // 현재 생성하려는 세션(예: 2026년 7,8월)과 동일한 기록은 계산에서 제외하여 로직 꼬임을 방지합니다.
+  // 현재 생성하려는 달의 기록이 이미 저장되어 있다면 계산에서 제외하여 중복 방지
   const filteredData = history?.data?.filter(s => s.sessionId !== currentSessionName) || [];
 
   filteredData.forEach(session => {
@@ -47,21 +47,23 @@ const getDutyMetadata = (history, members, currentSessionName) => {
   return { lastAny, lastDish, lastWipe, pairingHistory };
 };
 
-// 유효성 검사 (가족, B그룹, 기피 인원 등)
+// 슬롯별 유효성 검사 (가족, B그룹, 기피 인원 등)
 export const validateSlot = (name, partner, dayAll, allMembers, lastWeek) => {
   const m = allMembers.find(mem => mem.name === name);
   if (!m || lastWeek.includes(name) || dayAll.includes(name)) return false;
+
   const dayFamilies = dayAll.map(n => allMembers.find(mem => mem.name === n)?.familyId).filter(id => id && id !== "NONE");
   if (m.familyId !== "NONE" && dayFamilies.includes(m.familyId)) return false;
+
   if (m.isBGroup && partner && allMembers.find(mem => mem.name === partner)?.isBGroup) return false;
   if (m.exclusionList?.includes(partner)) return false;
+
   return true;
 };
 
-// 메인 스케줄 생성 함수
+// 메인 스케줄 생성 함수 (엄격한 순번제)
 export const generateSchedule = (dates, members, history, currentSessionName) => {
   let tempHistory = JSON.parse(JSON.stringify(history));
-  // 생성 시점에 기존 동명 세션 데이터를 제거하여 순번 왜곡을 막습니다.
   tempHistory.data = tempHistory.data.filter(s => s.sessionId !== currentSessionName);
   
   let schedule = [];
@@ -71,22 +73,17 @@ export const generateSchedule = (dates, members, history, currentSessionName) =>
     const { lastAny, lastDish, lastWipe, pairingHistory } = getDutyMetadata(tempHistory, members, currentSessionName);
     const dayNames = [];
 
-    // 동일 순번 내 무작위성을 부여하기 위한 헬퍼 함수
-    const sortWithRandom = (a, b, lastMap) => {
-      const diff = new Date(lastMap[a.name]) - new Date(lastMap[b.name]);
-      return diff !== 0 ? diff : Math.random() - 0.5;
-    };
-
-    // 1. 설거지 조 (18명 중 2명)
-    const dishCand = members.filter(m => m.canDishwash).sort((a, b) => sortWithRandom(a, b, lastDish));
+    // 1. 설거지 조 (18명 중 2명, 9주 주기 목표)
+    const dishCand = members.filter(m => m.canDishwash).sort((a, b) => new Date(lastDish[a.name]) - new Date(lastDish[b.name]));
     let dish = [];
     for (let a of dishCand) {
       if (!validateSlot(a.name, null, dayNames, members, lastWeek)) continue;
+      
+      // A와 가장 오래전에 만났던 파트너 찾기 (무작위성 제거)
       const partners = dishCand.filter(p => p.name !== a.name).sort((p1, p2) => {
         const k1 = [a.name, p1.name].sort().join('-');
         const k2 = [a.name, p2.name].sort().join('-');
-        const d = new Date(pairingHistory[k1]) - new Date(pairingHistory[k2]);
-        return d !== 0 ? d : Math.random() - 0.5;
+        return new Date(pairingHistory[k1]) - new Date(pairingHistory[k2]);
       });
       for (let b of partners) {
         if (validateSlot(b.name, a.name, [...dayNames, a.name], members, lastWeek)) {
@@ -97,16 +94,16 @@ export const generateSchedule = (dates, members, history, currentSessionName) =>
     }
     dayNames.push(...dish);
 
-    // 2. 식기닦기 조 (22명 중 2명)
-    const wipeCand = [...members].sort((a, b) => sortWithRandom(a, b, lastWipe));
+    // 2. 식기닦기 조 (22명 중 2명, 11주 주기 목표)
+    const wipeCand = [...members].sort((a, b) => new Date(lastWipe[a.name]) - new Date(lastWipe[b.name]));
     let wipe = [];
     for (let a of wipeCand) {
       if (dayNames.includes(a.name) || !validateSlot(a.name, null, dayNames, members, lastWeek)) continue;
+
       const partners = wipeCand.filter(p => p.name !== a.name && !dayNames.includes(p.name)).sort((p1, p2) => {
         const k1 = [a.name, p1.name].sort().join('-');
         const k2 = [a.name, p2.name].sort().join('-');
-        const d = new Date(pairingHistory[k1]) - new Date(pairingHistory[k2]);
-        return d !== 0 ? d : Math.random() - 0.5;
+        return new Date(pairingHistory[k1]) - new Date(pairingHistory[k2]);
       });
       for (let b of partners) {
         if (validateSlot(b.name, a.name, [...dayNames, a.name], members, lastWeek)) {

@@ -22,7 +22,6 @@ function App() {
 
   const handleGenerate = () => {
     const sessionName = `${selectedYear}년 ${selectedMonths}월`;
-    // 엔진에 현재 세션 이름을 전달하여 중복 계산을 방지합니다.
     const result = generateSchedule(
       getSundays(selectedYear, selectedMonths.split(',').map(m => parseInt(m.trim()))), 
       members, 
