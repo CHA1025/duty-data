@@ -21,7 +21,14 @@ function App() {
   }, []);
 
   const handleGenerate = () => {
-    const result = generateSchedule(getSundays(selectedYear, selectedMonths.split(',').map(m => parseInt(m.trim()))), members, history);
+    const sessionName = `${selectedYear}년 ${selectedMonths}월`;
+    // 엔진에 현재 세션 이름을 전달하여 중복 계산을 방지합니다.
+    const result = generateSchedule(
+      getSundays(selectedYear, selectedMonths.split(',').map(m => parseInt(m.trim()))), 
+      members, 
+      history,
+      sessionName
+    );
     setCurrentSchedule(result);
     setIsConfirmed(false);
   };
@@ -41,8 +48,6 @@ function App() {
   const confirm = async () => {
     const sessionName = `${selectedYear}년 ${selectedMonths}월`;
     const prevYearSessionName = `${selectedYear - 1}년 ${selectedMonths}월`;
-
-    // 1년 전 데이터 자동 삭제 로직
     let updatedHistoryData = history.data.filter(s => s.sessionId !== prevYearSessionName);
     const idx = updatedHistoryData.findIndex(s => s.sessionId === sessionName);
     
@@ -86,7 +91,14 @@ function App() {
           <strong>기록 관리: </strong>
           <select onChange={e => {
             const session = history.data.find(s => s.sessionId === e.target.value);
-            if (session) { setCurrentSchedule(session.records); setIsConfirmed(true); }
+            if (session) { 
+              setCurrentSchedule(session.records); 
+              setIsConfirmed(true); 
+              const yearMatch = e.target.value.match(/(\d{4})년/);
+              const monthMatch = e.target.value.match(/년\s+(.*)월/);
+              if (yearMatch) setSelectedYear(parseInt(yearMatch[1]));
+              if (monthMatch) setSelectedMonths(monthMatch[1]);
+            }
           }} style={{ padding: '5px' }}>
             <option value="">기록 불러오기</option>
             {history?.data.map(s => <option key={s.sessionId} value={s.sessionId}>{s.sessionId}</option>)}
@@ -126,7 +138,6 @@ function App() {
               ))}
             </tbody>
           </table>
-          
           <div style={{ display: 'flex', gap: '15px' }}>
             <button onClick={confirm} style={{ padding: '10px 25px', backgroundColor: '#4CAF50', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>저장하기</button>
             {isConfirmed && (
