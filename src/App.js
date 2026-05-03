@@ -76,15 +76,13 @@ function App() {
       setHistory(await fetchJson('history.json'));
     }
   };
-
-  // ★ 이 함수가 사용자님의 한글 양식에 맞춰 업데이트된 부분입니다 ★
+  
   const download = () => {
     if (currentSchedule.length === 0) {
       alert("생성된 당번 데이터가 없습니다.");
       return;
     }
 
-    // 1. 달별 데이터 분리 및 5주 단위 패딩 (색상 밀림 방지)
     const months = [...new Set(currentSchedule.map(s => s.date.split('-')[1]))];
     const padRecords = (records) => {
       const padded = [...records];
@@ -98,10 +96,8 @@ function App() {
     const month2Recs = padRecords(currentSchedule.filter(s => s.date.split('-')[1] === (months[1] || "")));
     const finalRecords = [...month1Recs, ...month2Recs];
 
-    // 2. 전체 필드 개수 50개 선언 (10주 * 5개 필드)
     let content = "50\r\n";
 
-    // 3. 데이터 문자열 생성 (한글의 제목 버림 특성 때문에 두 번 반복)[cite: 1]
     const makeDataString = (recs) => {
       return recs.map(s => {
         const d = s.date ? formatShortDate(s.date) : "";
@@ -109,9 +105,7 @@ function App() {
       }).join("\r\n") + "\r\n";
     };
 
-    const dataBlock = makeDataString(finalRecords);
-    content += dataBlock; // 제목용 (한글이 읽고 버림)[cite: 1]
-    content += dataBlock; // 실제 데이터
+    content += makeDataString(finalRecords); 
 
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const link = document.createElement("a");
