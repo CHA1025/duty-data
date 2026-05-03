@@ -78,17 +78,17 @@ function App() {
   };
 
   const download = () => {
-    // 1. 필드 개수 5 선언
     let content = "5\r\n"; 
     
-    // 2. 한글(HWP) 메일 머지 밀림 방지용 더미(제목) 5줄 추가
-    content += "날짜필드\r\n";
-    content += "설거지1필드\r\n";
-    content += "설거지2필드\r\n";
-    content += "식기닦기1필드\r\n";
-    content += "식기닦기2필드\r\n";
+    if (currentSchedule.length === 0) {
+      alert("생성된 당번 데이터가 없습니다.");
+      return;
+    }
 
-    // 3. 실제 데이터 추가 (날짜는 MM/DD 형식으로 변환)
+    const dummy = currentSchedule[0];
+    const dummyDate = formatShortDate(dummy.date);
+    content += `${dummyDate}\r\n${dummy.dish[0]}\r\n${dummy.dish[1]}\r\n${dummy.wipe[0]}\r\n${dummy.wipe[1]}\r\n`;
+
     currentSchedule.forEach(s => {
       const shortDate = formatShortDate(s.date); // "05/03" 형태로 변환
       content += `${shortDate}\r\n${s.dish[0]}\r\n${s.dish[1]}\r\n${s.wipe[0]}\r\n${s.wipe[1]}\r\n`;
