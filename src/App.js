@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { fetchJson, updateJson } from './utils/github';
 import { getSundays, generateSchedule } from './utils/engine';
 
-// 날짜를 2026-05-03 -> 05/03 형식으로 변환
 const formatShortDate = (dateString) => {
   if (!dateString) return '';
   const parts = dateString.split('-');
@@ -43,17 +42,30 @@ function App() {
     setIsConfirmed(false);
   };
 
+  const handleManualChange = (date, group, index, newName) => {
+    const updated = currentSchedule.map(s => {
+      if (s.date === date) {
+        const newGroup = [...s[group]];
+        newGroup[index] = newName;
+        return { 
+          ...s, 
+          [group]: newGroup, 
+          allNames: group === 'dish' ? [...newGroup, ...s.wipe] : [...s.dish, ...newGroup] 
+        };
+      }
+      return s;
+    });
+    setCurrentSchedule(updated);
+  };
+
   const confirm = async () => {
     const sessionName = `${selectedYear}년 ${selectedMonths}월`;
     const prevYearSessionName = `${selectedYear - 1}년 ${selectedMonths}월`;
     let updatedHistoryData = history.data.filter(s => s.sessionId !== prevYearSessionName);
     const idx = updatedHistoryData.findIndex(s => s.sessionId === sessionName);
-    
     if (idx !== -1 && !window.confirm("이미 존재하는 기록입니다. 덮어쓰시겠습니까?")) return;
-    
     if (idx !== -1) updatedHistoryData[idx] = { sessionId: sessionName, records: currentSchedule };
     else updatedHistoryData.push({ sessionId: sessionName, records: currentSchedule });
-
     if (await updateJson('history.json', updatedHistoryData, history.sha)) {
       alert("성공적으로 저장되었습니다.");
       setIsConfirmed(true);
@@ -64,24 +76,23 @@ function App() {
   const download = () => {
     if (currentSchedule.length === 0) return;
 
-    // 1. 달별 데이터 분리 및 5주 단위 패딩 (색상 밀림 방지)
+    // 1. 달별 데이터 분리 및 5주 단위 패딩 (색상 밀림 방지 로직)
     const months = [...new Set(currentSchedule.map(s => s.date.split('-')[1]))];
     const padRecords = (records) => {
       const padded = [...records];
       while (padded.length < 5) {
         padded.push({ date: "", dish: ["", ""], wipe: ["", ""] });
       }
-      return padded.slice(0, 5); // 5주 고정
+      return padded.slice(0, 5); 
     };
 
     const month1Recs = padRecords(currentSchedule.filter(s => s.date.split('-')[1] === months[0]));
     const month2Recs = padRecords(currentSchedule.filter(s => s.date.split('-')[1] === (months[1] || "")));
     const finalRecords = [...month1Recs, ...month2Recs];
 
-    // 2. 전체 필드 개수 50개 선언 (10주 * 5개 필드)
+    // 2. 전체 필드 개수 50개 선언 (10주 * 5개 필드)[cite: 1]
     let content = "50\r\n";
 
-    // 3. 데이터 문자열 생성 함수 (제목 버림 방지를 위해 두 번 반복)[cite: 1]
     const makeDataBlock = (recs) => {
       return recs.map(s => {
         const d = s.date ? formatShortDate(s.date) : "";
@@ -90,8 +101,8 @@ function App() {
     };
 
     const dataBlock = makeDataBlock(finalRecords);
-    content += dataBlock; // 한글이 읽고 버릴 가짜 데이터 (제목역할)[cite: 1]
-    content += dataBlock; // 실제 출력될 진짜 데이터[cite: 1]
+    content += dataBlock; // 제목용 더미 (버림)[cite: 1]
+    content += dataBlock; // 실제 데이터
 
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const link = document.createElement("a");
@@ -104,7 +115,6 @@ function App() {
     <div style={{ padding: '15px', maxWidth: '850px', margin: '0 auto', fontFamily: 'sans-serif' }}>
       <h2 style={{ borderBottom: '2px solid #333', paddingBottom: '10px' }}>주일 당번 관리</h2>
       
-      {/* 모바일 최적화 설정 패널[cite: 1] */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', marginBottom: '20px', padding: '15px', background: '#f8f9fa', borderRadius: '8px' }}>
         <div style={{ flex: '1 1 280px' }}>
           <strong>연도/월:</strong> {selectedYear}년 
@@ -126,7 +136,6 @@ function App() {
         </div>
       </div>
 
-      {/* 테이블 가로 스크롤 및 날짜 줄바꿈 방지[cite: 1] */}
       <div style={{ overflowX: 'auto', marginBottom: '20px' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '450px', border: '1px solid #ddd' }}>
           <thead style={{ background: '#eee' }}>
@@ -140,8 +149,24 @@ function App() {
             {currentSchedule.map((s, idx) => (
               <tr key={idx} style={{ textAlign: 'center' }}>
                 <td style={{ padding: '10px', border: '1px solid #ddd', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatShortDate(s.date)}</td>
-                <td style={{ padding: '10px', border: '1px solid #ddd' }}>{s.dish.join(', ')}</td>
-                <td style={{ padding: '10px', border: '1px solid #ddd' }}>{s.wipe.join(', ')}</td>
+                <td style={{ padding: '10px', border: '1px solid #ddd' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {s.dish.map((name, i) => (
+                      <select key={i} value={name} onChange={e => handleManualChange(s.date, 'dish', i, e.target.value)}>
+                        {members.filter(m => m.canDishwash).map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
+                      </select>
+                    ))}
+                  </div>
+                </td>
+                <td style={{ padding: '10px', border: '1px solid #ddd' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {s.wipe.map((name, i) => (
+                      <select key={i} value={name} onChange={e => handleManualChange(s.date, 'wipe', i, e.target.value)}>
+                        {members.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
+                      </select>
+                    ))}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
